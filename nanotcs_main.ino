@@ -27,14 +27,14 @@ void requestEvent() {
   uint16_t r, g, b, c;
   tcs.getRawData(&r, &g, &b, &c);
 
-  String colorStatus;
-  if (c < 300) { 
-    colorStatus = "Black";
+  char colorStatus[10];
+  if (c < 300) {  
+    strcpy(colorStatus, "Black");
   } else if (c > 1000) {
-    colorStatus = "White";
+    strcpy(colorStatus, "White");
   } else {
-    colorStatus = "Other";
+    strcpy(colorStatus, "Other");
   }
   
-  Wire.write(colorStatus.c_str());
+  Wire.write(colorStatus);
 }
