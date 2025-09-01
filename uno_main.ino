@@ -1,54 +1,65 @@
 #include <Wire.h>
-#include <NewPing.h> // 초음파 센서 라이브러리
-#include <Adafruit_TCS34725.h> // 컬러 센서 라이브러리 (TCS34725 기준)
+#include <Adafruit_TCS34725.h>
 
-#define SONAR_PIN_TRIG 9
-#define SONAR_PIN_ECHO 10
-#define MAX_DISTANCE 200
+// 초음파 센서 핀 설정
+#define TRIG_PIN 9
+#define ECHO_PIN 10
 
-NewPing sonar(SONAR_PIN_TRIG, SONAR_PIN_ECHO, MAX_DISTANCE);
-Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_4X);
+// TCS34725 센서 설정
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_1X);
 
-// I2C 주소는 1부터 127 사이의 고유한 값
-#define SLAVE_ADDRESS 8
+// I2C 슬레이브 주소 설정
+const int slaveAddress = 0x08;
 
 void setup() {
-  Wire.begin(SLAVE_ADDRESS);
+  Wire.begin(slaveAddress);
   Wire.onRequest(requestEvent);
-  
-  // 시리얼 모니터 디버깅 용
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
   Serial.begin(9600);
   
+  // TCS 센서 초기화
   if (tcs.begin()) {
-    Serial.println("Found sensor");
+    Serial.println("Found TCS34725 sensor!");
   } else {
-    Serial.println("No TCS34725 found");
+    Serial.println("No TCS34725 sensor found ... check your wiring!");
+    while (1);
   }
 }
 
 void loop() {
-  // 별도의 작업 없음. 마스터의 요청을 기다림
+  // 메인 루프에서는 특별히 할 일이 없습니다.
+  // 데이터를 요청받았을 때만 requestEvent 함수가 호출됩니다.
 }
 
+// 마스터로부터 데이터 요청이 들어왔을 때 실행되는 함수
 void requestEvent() {
-  // 초음파 센서 값 측정
-  unsigned int uS = sonar.ping_median();
-  float distanceCm = uS / US_ROUNDTRIP_CM;
-  
-  // 컬러 센서 값 측정 (예시로 R, G, B 값 중 하나만 사용)
+  // 1. 초음파 센서 데이터 읽기
+  long duration, distance;
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  duration = pulseIn(ECHO_PIN, HIGH);
+  distance = (duration / 2) / 29.1;
+
+  // 2. TCS 컬러 센서 데이터 읽기
   uint16_t r, g, b, c;
   tcs.getRawData(&r, &g, &b, &c);
-  // 검은색(0)과 흰색(1) 상태를 감지하는 로직
-  String colorState = "0"; // 기본값은 0(검은색)
-  if (c > 500) { // 임계값은 환경에 따라 조절
-      colorState = "1"; // 1(흰색)
+  // 검은색과 흰색 구별 (임계값은 환경에 따라 조절 필요)
+  String colorStatus;
+  if (c < 300) { // 어두울 경우 (검은색)
+    colorStatus = "Black";
+  } else if (c > 1000) { // 밝을 경우 (흰색)
+    colorStatus = "White";
+  } else {
+    colorStatus = "Other";
   }
-  
-  // 조도 센서 값 측정 (예시로 포토레지스터 사용)
-  int lightValue = analogRead(A0);
-  
-  // 모든 센서 데이터를 문자열로 조합
-  String data = "U_" + String(distanceCm) + ",C1_" + colorState + ",L_" + String(lightValue);
-  
-  Wire.write(data.c_str());
+
+  // 3. 초음파 센서 데이터와 컬러 센서 데이터를 결합하여 전송
+  String dataToSend = String(distance) + "," + colorStatus;
+  Wire.write(dataToSend.c_str());
 }
