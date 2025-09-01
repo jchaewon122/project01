@@ -1,37 +1,40 @@
 #include <Wire.h>
 #include <Adafruit_TCS34725.h>
 
-// I2C 주소는 다른 보드들과 달라야 함
-#define SLAVE_ADDRESS 10
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_1X);
 
-Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_4X);
+const int slaveAddress = 0x09;
 
 void setup() {
-  Wire.begin(SLAVE_ADDRESS);
+  Wire.begin(slaveAddress);
   Wire.onRequest(requestEvent);
   
   Serial.begin(9600);
   
-  if (!tcs.begin()) {
-    Serial.println("No TCS34725 found");
+  if (tcs.begin()) {
+    Serial.println("Found TCS34725 sensor!");
+  } else {
+    Serial.println("No TCS34725 sensor found ... check your wiring!");
+    while (1);
   }
 }
 
 void loop() {
-  // 별도의 작업 없음
+  // 메인 루프에서는 특별히 할 일이 없습니다.
 }
 
 void requestEvent() {
   uint16_t r, g, b, c;
   tcs.getRawData(&r, &g, &b, &c);
-  
-  // 검은색(0)과 흰색(1) 상태를 감지하는 로직
-  String colorState = "0";
-  if (c > 500) { // 임계값은 환경에 따라 조절
-      colorState = "1";
+
+  String colorStatus;
+  if (c < 300) { 
+    colorStatus = "Black";
+  } else if (c > 1000) {
+    colorStatus = "White";
+  } else {
+    colorStatus = "Other";
   }
   
-  String data = "C2_" + colorState;
-  
-  Wire.write(data.c_str());
+  Wire.write(colorStatus.c_str());
 }
