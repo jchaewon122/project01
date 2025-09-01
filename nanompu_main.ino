@@ -35,11 +35,13 @@ void requestEvent() {
   mpu.getEvent(&a, &g, &temp);
 
   // Z축 가속도 값을 사용해 급제동 여부 판단
-  String brakeStatus = "Normal";
+  char brakeStatus[15];
   // 급제동 임계값 (수치는 실제 환경에서 조정 필요)
-  if (a.acceleration.z > 2.0) { 
-    brakeStatus = "HardBrake";
+  if (a.acceleration.z > 2.0) {  
+    strcpy(brakeStatus, "HardBrake");
+  } else {
+    strcpy(brakeStatus, "Normal");
   }
   
-  Wire.write(brakeStatus.c_str());
+  Wire.write(brakeStatus);
 }
