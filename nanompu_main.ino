@@ -4,14 +4,12 @@
 
 Adafruit_MPU6050 mpu;
 
-// I2C 주소는 UNO와 달라야 함
-#define SLAVE_ADDRESS 9
+const int slaveAddress = 0x0A;
 
 void setup() {
-  Wire.begin(SLAVE_ADDRESS);
+  Wire.begin(slaveAddress);
   Wire.onRequest(requestEvent);
   
-  // 시리얼 모니터 디버깅 용
   Serial.begin(9600);
   
   if (!mpu.begin()) {
@@ -20,20 +18,28 @@ void setup() {
       delay(10);
     }
   }
+  Serial.println("MPU6050 Found!");
+
+  // MPU6500 설정
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  mpu.setGyroRange(MPU6050_GYRO_RANGE_500_DEG);
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 }
 
 void loop() {
-  // 별도의 작업 없음
+  // 메인 루프에서는 특별히 할 일이 없습니다.
 }
 
 void requestEvent() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
+
+  // Z축 가속도 값을 사용해 급제동 여부 판단
+  String brakeStatus = "Normal";
+  // 급제동 임계값 (수치는 실제 환경에서 조정 필요)
+  if (a.acceleration.z > 2.0) { 
+    brakeStatus = "HardBrake";
+  }
   
-  // 가속도 센서 값 (X, Y, Z)을 문자열로 조합
-  String data = "A_" + String(a.acceleration.x) + "," + String(a.acceleration.y) + "," + String(a.acceleration.z);
-  
-  Wire.write(data.c_str());
+  Wire.write(brakeStatus.c_str());
 }
