@@ -1,13 +1,23 @@
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h> // I2C LCD 라이브러리
+#include <LiquidCrystal_I2C.h>
 
-// LCD 주소와 크기
-LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD 주소는 다를 수 있으니 확인 필요
+// LCD I2C 주소 설정 (기본값은 0x27)
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 // 슬레이브 주소
-#define UNO_ADDRESS 8
-#define NANO1_ADDRESS 9
-#define NANO2_ADDRESS 10
+const int unoSlave = 0x08;
+const int nano1Slave = 0x09;
+const int nano2Slave = 0x0A;
+
+// 운전 점수 및 감점 요인
+int drivingScore = 100;
+int laneChangeCount = 0;
+int hardBrakeCount = 0;
+int obstacleWarningCount = 0;
+
+// 차선 변경 감지용 상태 변수
+String lastLeftColor = "";
+String lastRightColor = "";
 
 void setup() {
   Wire.begin();
@@ -17,28 +27,35 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("System Ready!");
+  lcd.print("Driving Start!");
   delay(2000);
   lcd.clear();
 }
 
 void loop() {
-  // 각 슬레이브에서 데이터 읽어오기
-  String unoData = readI2CData(UNO_ADDRESS);
-  String nano1Data = readI2CData(NANO1_ADDRESS);
-  String nano2Data = readI2CData(NANO2_ADDRESS);
+  // 1초마다 데이터 읽기
+  delay(1000);
 
-  // 데이터 가공 및 출력
-  processAndDisplay(unoData, nano1Data, nano2Data);
-  
-  delay(1000); // 1초마다 업데이트
+  // 슬레이브로부터 데이터 읽기
+  String unoData = readSlaveData(unoSlave);
+  String nano1Data = readSlaveData(nano1Slave);
+  String nano2Data = readSlaveData(nano2Slave);
+
+  // 데이터 파싱
+  String distanceStr = unoData.substring(0, unoData.indexOf(','));
+  String leftColor = unoData.substring(unoData.indexOf(',') + 1);
+  String rightColor = nano1Data;
+  String brakeStatus = nano2Data;
+
+  // 점수 계산 및 LCD에 표시
+  calculateScore(distanceStr.toInt(), leftColor, rightColor, brakeStatus);
+  displayOnLcd();
 }
 
-// I2C 데이터 읽기 함수
-String readI2CData(int address) {
+// 슬레이브로부터 데이터 읽기 함수
+String readSlaveData(int address) {
+  Wire.requestFrom(address, 32); // 32바이트 요청
   String receivedData = "";
-  Wire.requestFrom(address, 64); // 슬레이브에 64바이트 데이터 요청
-  
   while (Wire.available()) {
     char c = Wire.read();
     receivedData += c;
@@ -46,33 +63,62 @@ String readI2CData(int address) {
   return receivedData;
 }
 
-// 데이터 가공 및 LCD 출력 함수
-void processAndDisplay(String uno, String nano1, String nano2) {
-  // unoData에서 각 센서 값 파싱
-  float distance = uno.substring(uno.indexOf("U_") + 2, uno.indexOf(",")).toFloat();
-  String color1 = uno.substring(uno.indexOf("C1_") + 3, uno.indexOf(",", uno.indexOf("C1_"))).c_str();
-  float light = uno.substring(uno.indexOf("L_") + 2).toFloat();
+// 운전 점수 계산 함수
+void calculateScore(int distance, String leftColor, String rightColor, String brakeStatus) {
+  // 1. 차선 변경 감지
+  if (isLaneChange(leftColor, rightColor)) {
+    laneChangeCount++;
+    drivingScore -= 5;
+    Serial.println("Lane Change Detected!");
+  }
 
-  // nano1Data에서 가속도 값 파싱
-  // (가속도 값은 복잡하므로 X축만 예시로)
-  float accelX = nano1.substring(nano1.indexOf("A_") + 2, nano1.indexOf(",")).toFloat();
+  // 2. 급브레이크 감지
+  if (brakeStatus == "HardBrake") {
+    hardBrakeCount++;
+    drivingScore -= 10;
+    Serial.println("Hard Brake Detected!");
+  }
+
+  // 3. 앞 차 간격 감지
+  if (distance < 30 && distance > 0) { // 30cm 이내 접근 시 감점
+    obstacleWarningCount++;
+    drivingScore -= 3;
+    Serial.println("Obstacle Warning! (Distance: " + String(distance) + "cm)");
+  }
   
-  // nano2Data에서 컬러 값 파싱
-  String color2 = nano2.substring(nano2.indexOf("C2_") + 3).c_str();
+  // 점수 하한선
+  if (drivingScore < 0) {
+    drivingScore = 0;
+  }
+}
 
-  // LCD에 출력
+// 차선 변경 여부 판단
+bool isLaneChange(String leftColor, String rightColor) {
+  if (lastLeftColor == "Black" && leftColor == "White" && rightColor == "Black") {
+    lastLeftColor = leftColor;
+    lastRightColor = rightColor;
+    return true;
+  } else if (lastRightColor == "Black" && rightColor == "White" && leftColor == "Black") {
+    lastLeftColor = leftColor;
+    lastRightColor = rightColor;
+    return true;
+  }
+  lastLeftColor = leftColor;
+  lastRightColor = rightColor;
+  return false;
+}
+
+// LCD에 점수 표시
+void displayOnLcd() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("D:");
-  lcd.print(distance);
-  lcd.print(" C1:");
-  lcd.print(color1);
-  lcd.print(" C2:");
-  lcd.print(color2);
-
+  lcd.print("Score: ");
+  lcd.print(drivingScore);
   lcd.setCursor(0, 1);
-  lcd.print("L:");
-  lcd.print(light);
-  lcd.print(" A_X:");
-  lcd.print(accelX);
+  lcd.print("HB:");
+  lcd.print(hardBrakeCount);
+  lcd.print(" LC:");
+  lcd.print(laneChangeCount);
+  lcd.print(" OW:");
+  lcd.print(obstacleWarningCount);
 }
