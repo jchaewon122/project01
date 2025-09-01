@@ -11,6 +11,11 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS347
 // I2C 슬레이브 주소 설정
 const int slaveAddress = 0x08;
 
+// 센서 데이터를 저장할 전역 변수
+volatile long currentDistance = -1;
+volatile String currentColorStatus = "Error";
+bool tcsSensorFound = false;
+
 void setup() {
   Wire.begin(slaveAddress);
   Wire.onRequest(requestEvent);
@@ -23,43 +28,67 @@ void setup() {
   // TCS 센서 초기화
   if (tcs.begin()) {
     Serial.println("Found TCS34725 sensor!");
+    tcsSensorFound = true;
   } else {
     Serial.println("No TCS34725 sensor found ... check your wiring!");
-    while (1);
+    tcsSensorFound = false;
   }
 }
 
 void loop() {
-  // 메인 루프에서는 특별히 할 일이 없습니다.
-  // 데이터를 요청받았을 때만 requestEvent 함수가 호출됩니다.
+  // 100ms 주기로 센서 값을 업데이트
+  static unsigned long lastSensorReadTime = 0;
+  unsigned long currentTime = millis();
+
+  if (currentTime - lastSensorReadTime >= 100) {
+    lastSensorReadTime = currentTime;
+    
+    // 초음파 센서 데이터 읽기
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    
+    // 타임아웃 추가
+    long duration = pulseIn(ECHO_PIN, HIGH, 100000); 
+    
+    if (duration > 0) {
+      currentDistance = (duration / 2) / 29.1;
+    } else {
+      currentDistance = -1; // 타임아웃 발생
+    }
+
+    // TCS 컬러 센서 데이터 읽기
+    if (tcsSensorFound) {
+      uint16_t r, g, b, c;
+      tcs.getRawData(&r, &g, &b, &c);
+      if (c < 300) {
+        currentColorStatus = "Black";
+      } else if (c > 1000) {
+        currentColorStatus = "White";
+      } else {
+        currentColorStatus = "Other";
+      }
+    } else {
+      currentColorStatus = "Error";
+    }
+
+    // 시리얼 모니터로 값 출력 (디버깅용)
+    Serial.print("Distance: ");
+    Serial.print(currentDistance);
+    Serial.print(" cm, Color: ");
+    Serial.println(currentColorStatus);
+  }
 }
 
-// 마스터로부터 데이터 요청이 들어왔을 때 실행되는 함수
 void requestEvent() {
-  // 1. 초음파 센서 데이터 읽기
-  long duration, distance;
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-  duration = pulseIn(ECHO_PIN, HIGH);
-  distance = (duration / 2) / 29.1;
-
-  // 2. TCS 컬러 센서 데이터 읽기
-  uint16_t r, g, b, c;
-  tcs.getRawData(&r, &g, &b, &c);
-  // 검은색과 흰색 구별 (임계값은 환경에 따라 조절 필요)
-  String colorStatus;
-  if (c < 300) { // 어두울 경우 (검은색)
-    colorStatus = "Black";
-  } else if (c > 1000) { // 밝을 경우 (흰색)
-    colorStatus = "White";
-  } else {
-    colorStatus = "Other";
-  }
-
-  // 3. 초음파 센서 데이터와 컬러 센서 데이터를 결합하여 전송
-  String dataToSend = String(distance) + "," + colorStatus;
-  Wire.write(dataToSend.c_str());
+  // 미리 읽어둔 센서 데이터를 마스터에 전송
+  char dataToSend[32]; // 전송할 데이터를 위한 char 배열
+  
+  // 데이터를 char 배열로 포맷
+  sprintf(dataToSend, "%ld,%s", currentDistance, currentColorStatus.c_str());
+  
+  // char 배열을 전송
+  Wire.write(dataToSend);
 }
