@@ -32,18 +32,15 @@ void setup() {
 }
 
 void loop() {
-  // Check for commands from master
   if (orangeSerial.available()) {
     String command = orangeSerial.readStringUntil('\n');
     command.trim();
 
-    // Check for data request
     if (command == "REQ_DATA") {
       sendDataToMaster();
     }
   }
 
-  // Periodic sensor reading
   unsigned long currentTime = millis();
   if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
     lastSensorReadTime = currentTime;
@@ -55,7 +52,6 @@ void sendDataToMaster() {
   orangeSerial.print("TCS:");
   orangeSerial.println(currentColorStatus);
   
-  // 전송 완료 대기
   orangeSerial.flush();
   
   Serial.print("Sent to master - Color: ");
@@ -67,7 +63,6 @@ void updateSensorData() {
     uint16_t r, g, b, c;
     tcs.getRawData(&r, &g, &b, &c);
     
-    // 센서 에러 체크
     if (c == 0) {
       currentColorStatus = "Error";
       return;
@@ -75,7 +70,6 @@ void updateSensorData() {
     
     long rgbSum = r + g + b;
 
-    // 임계값 조정 및 추가 검증
     if (rgbSum < 1600) {
       currentColorStatus = "Black";
     } else if (rgbSum > 1600) {
