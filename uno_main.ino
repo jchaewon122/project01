@@ -14,9 +14,12 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_154MS, TCS347
 
 long currentDistance = -1;
 String currentColorStatus = "Other";
+int obstacleWarningCount = 0;
+unsigned long lastObstacleWarningTime = 0;
+const unsigned long OBSTACLE_WARNING_COOLDOWN = 1000;
 bool tcsSensorFound = false;
 unsigned long lastSensorReadTime = 0;
-const unsigned long SENSOR_READ_INTERVAL = 100; // 센서 읽기 간격을 늘림
+const unsigned long SENSOR_READ_INTERVAL = 100;
 
 void updateSensorData();
 void sendDataToMaster();
@@ -49,17 +52,14 @@ void setup() {
 }
 
 void loop() {
-  // Check for commands from master
   if (orangeSerial.available()) {
     String command = orangeSerial.readStringUntil('\n');
     command.trim();
 
-    // Check for data request
     if (command == "REQ_DATA") {
       sendDataToMaster();
     }
     
-    // Handle score updates
     if (command.startsWith("SCORE:")) {
       String scoreString = command.substring(6);
       int receivedScore = scoreString.toInt();
@@ -67,7 +67,6 @@ void loop() {
     }
   }
 
-  // Periodic sensor reading for local processing
   unsigned long currentTime = millis();
   if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
     lastSensorReadTime = currentTime;
@@ -79,18 +78,23 @@ void sendDataToMaster() {
   orangeSerial.print("UNO:");
   orangeSerial.print(currentDistance);
   orangeSerial.print(",");
-  orangeSerial.println(currentColorStatus);
+  orangeSerial.print(currentColorStatus);
+  orangeSerial.print(",");
+  orangeSerial.println(obstacleWarningCount);
   
-  // 전송 완료 대기
   orangeSerial.flush();
   
-  Serial.print("Sent to master - Distance: ");
+  Serial.print("Sent to master - D:");
   Serial.print(currentDistance);
-  Serial.print(", Color: ");
-  Serial.println(currentColorStatus);
+  Serial.print(", C:");
+  Serial.print(currentColorStatus);
+  Serial.print(", OC:");
+  Serial.println(obstacleWarningCount);
 }
 
 void updateSensorData() {
+  unsigned long currentTime = millis();
+  
   // Read ultrasonic sensor
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
@@ -98,15 +102,20 @@ void updateSensorData() {
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
 
   if (duration > 0) {
-    currentDistance = (duration * 0.034) / 2; // 더 정확한 계산식
-    // 범위 제한 (2cm ~ 400cm)
+    currentDistance = (duration * 0.034) / 2;
     if (currentDistance < 2) currentDistance = 2;
     if (currentDistance > 400) currentDistance = 400;
+
+    // Obstacle Warning Logic
+    if (currentDistance > 0 && currentDistance < 30 && currentTime - lastObstacleWarningTime > OBSTACLE_WARNING_COOLDOWN) {
+      obstacleWarningCount++;
+      lastObstacleWarningTime = currentTime;
+    }
   } else {
-    currentDistance = -1; // 측정 실패
+    currentDistance = -1;
   }
 
   // Read color sensor
@@ -114,15 +123,12 @@ void updateSensorData() {
     uint16_t r, g, b, c;
     tcs.getRawData(&r, &g, &b, &c);
     
-    // 센서 에러 체크
     if (c == 0) {
       currentColorStatus = "Error";
       return;
     }
     
     long rgbSum = r + g + b;
-
-    // 임계값 조정 및 추가 검증
     if (rgbSum < 1600) {
       currentColorStatus = "Black";
     } else if (rgbSum > 1600) {
@@ -145,5 +151,5 @@ void displayScore(int score) {
   lcd.print("D:");
   lcd.print(currentDistance);
   lcd.print(" C:");
-  lcd.print(currentColorStatus.substring(0, 5)); // 처음 5글자만
+  lcd.print(currentColorStatus.substring(0, 5));
 }
