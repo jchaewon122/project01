@@ -23,6 +23,10 @@ long currentDistance = -1;
 String currentColorStatus = "Other";
 bool tcsSensorFound = false;
 
+// New variable for continuous reading
+unsigned long lastSensorReadTime = 0;
+const unsigned long SENSOR_READ_INTERVAL = 50; // 50ms interval for continuous reading
+
 void setup() {
   Serial.begin(9600); // For PC debug monitor
   orangeBleSerial.begin(9600); // Start serial communication with Orange BLE
@@ -77,6 +81,13 @@ void loop() {
       lcd.print(receivedScore);
     }
   }
+
+  // --- New Logic for continuous monitoring ---
+  unsigned long currentTime = millis();
+  if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
+    lastSensorReadTime = currentTime;
+    updateSensorData();
+  }
 }
 
 // Function to update sensor data
@@ -105,7 +116,7 @@ void updateSensorData() {
     long rgbSum = r + g + b;
 
     // Use a robust threshold for color detection
-    if (rgbSum < 3000) {
+    if (rgbSum < 1600) { 
       currentColorStatus = "Black";
     } else {
       currentColorStatus = "White";
