@@ -1,26 +1,25 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include <Wire.h>
 
-// MPU6050 센서 객체
+// MPU6050 sensor object
 Adafruit_MPU6050 mpu;
 
-// 급제동 감지를 위한 변수들
-float accelThreshold = 12.0; // 급제동 임계값 (m/s²)
+// Variables for hard brake detection
+float accelThreshold = 12.0; // Hard brake threshold (m/s²)
 float prevAccelMagnitude = 0.0;
 unsigned long lastHardBrakeTime = 0;
-const unsigned long BRAKE_DETECTION_COOLDOWN = 1000; // 1초 쿨다운
+const unsigned long BRAKE_DETECTION_COOLDOWN = 1000; // 1s cooldown
 bool mpuSensorFound = false;
 
 void setup() {
-  Serial.begin(9600); // 오렌지 BLE와의 시리얼 통신 시작
+  Serial.begin(9600); // Start serial communication with Orange BLE
   
-  // MPU6050 센서 초기화
+  // Initialize MPU6050 sensor
   if (mpu.begin()) {
     Serial.println("NANO2: Found MPU6050 sensor!");
     mpuSensorFound = true;
     
-    // MPU6050 설정
+    // MPU6050 settings
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_GYRO_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
@@ -35,7 +34,7 @@ void setup() {
 }
 
 void loop() {
-  // 20ms 주기로 센서 값을 업데이트
+  // Update sensor values every 20ms
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
   
@@ -69,7 +68,7 @@ void loop() {
       currentBrakeStatus = "Error";
     }
     
-    // 데이터 전송
+    // Transmit data
     Serial.println(currentBrakeStatus);
   }
 }
