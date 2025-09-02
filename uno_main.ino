@@ -49,27 +49,25 @@ void setup() {
 }
 
 void loop() {
-  // Update sensor values every 50ms
-  static unsigned long lastSensorReadTime = 0;
-  unsigned long currentTime = millis();
-
-  if (currentTime - lastSensorReadTime >= 50) {
-    lastSensorReadTime = currentTime;
-    updateSensorData();
-
-    // Transmit data to Orange BLE with a unique ID
-    orangeBleSerial.print("UNO:");
-    orangeBleSerial.print(currentDistance);
-    orangeBleSerial.print(",");
-    orangeBleSerial.println(currentColorStatus);
-  }
-
-  // Check for incoming data (score) from Orange BLE
+  // Check for incoming command from Orange BLE
   if (orangeBleSerial.available()) {
-    String data = orangeBleSerial.readStringUntil('\n');
-    data.trim();
-    if (data.startsWith("SCORE:")) {
-      String scoreString = data.substring(6);
+    String command = orangeBleSerial.readStringUntil('\n');
+    command.trim();
+
+    // If the command is "GET_UNO", update and send data
+    if (command == "GET_UNO") {
+      updateSensorData();
+
+      // Transmit data to Orange BLE with a unique ID
+      orangeBleSerial.print("UNO:");
+      orangeBleSerial.print(currentDistance);
+      orangeBleSerial.print(",");
+      orangeBleSerial.println(currentColorStatus);
+    }
+    
+    // Check for incoming score from Orange BLE
+    if (command.startsWith("SCORE:")) {
+      String scoreString = command.substring(6);
       int receivedScore = scoreString.toInt();
 
       // Display the received score on the LCD
