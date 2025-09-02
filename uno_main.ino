@@ -1,28 +1,24 @@
 #include <Adafruit_TCS34725.h>
-#include <LiquidCrystal_I2C.h>
 
-// 초음파 센서 핀 설정
+// Ultrasonic sensor pins
 #define TRIG_PIN 9
 #define ECHO_PIN 10
 
-// TCS34725 센서 설정
+// TCS34725 sensor configuration
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_1X);
 
-// LCD 주소 설정
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-// 센서 데이터를 저장할 전역 변수
+// Global variables for sensor data
 long currentDistance = -1;
 String currentColorStatus = "Other";
 bool tcsSensorFound = false;
 
 void setup() {
-  Serial.begin(9600); // 오렌지 BLE와의 시리얼 통신 시작
+  Serial.begin(9600); // Start serial communication with Orange BLE
   
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
-  // TCS 센서 초기화
+  // Initialize TCS sensor
   if (tcs.begin()) {
     Serial.println("UNO: TCS34725 sensor found!");
     tcsSensorFound = true;
@@ -35,7 +31,7 @@ void setup() {
 }
 
 void loop() {
-  // 50ms 주기로 센서 값을 업데이트
+  // Update sensor values every 50ms
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
   
@@ -43,16 +39,16 @@ void loop() {
     lastSensorReadTime = currentTime;
     updateSensorData();
     
-    // 오렌지 BLE로 데이터 전송
+    // Transmit data to Orange BLE
     Serial.print(currentDistance);
     Serial.print(",");
     Serial.println(currentColorStatus);
   }
 }
 
-// 센서 데이터 업데이트 함수
+// Function to update sensor data
 void updateSensorData() {
-  // 초음파 센서 데이터 읽기
+  // Read data from ultrasonic sensor
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
@@ -72,7 +68,7 @@ void updateSensorData() {
     currentDistance = -1;
   }
   
-  // TCS 컬러 센서 데이터 읽기
+  // Read data from TCS color sensor
   if (tcsSensorFound) {
     uint16_t r, g, b, c;
     if (tcs.getRawData(&r, &g, &b, &c)) {
