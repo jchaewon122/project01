@@ -29,9 +29,7 @@ const unsigned long SOLID_LINE_MIN_DURATION = 800; // Solid line if on for > 0.8
 
 // Debouncing for hard brake and obstacle warnings
 unsigned long lastObstacleWarningTime = 0;
-unsigned long lastHardBrakeTime = 0;
 const unsigned long OBSTACLE_WARNING_COOLDOWN = 1000;
-const unsigned long HARD_BRAKE_COOLDOWN = 1000;
 
 // Sensor error flags
 bool nanoTcsError = false;
@@ -220,12 +218,19 @@ void parseUnoData(String data) {
   if (data.startsWith("UNO:")) {
     data = data.substring(4); // Remove "UNO:"
     int firstComma = data.indexOf(',');
-    if (firstComma != -1) {
+    int secondComma = data.lastIndexOf(',');
+    if (firstComma != -1 && secondComma != -1 && firstComma != secondComma) {
       String distanceStr = data.substring(0, firstComma);
       distance = distanceStr.toInt();
-      unoRightColor = data.substring(firstComma + 1);
+      unoRightColor = data.substring(firstComma + 1, secondComma);
+      int newObstacleCount = data.substring(secondComma + 1).toInt();
       
-      // 데이터 유효성 검사
+      if (newObstacleCount > obstacleWarningCount) {
+        drivingScore -= 3;
+        if (drivingScore < 0) drivingScore = 0;
+      }
+      obstacleWarningCount = newObstacleCount;
+      
       if (distance < 0 || distance > 400) {
         distance = -1;
       }
@@ -235,10 +240,12 @@ void parseUnoData(String data) {
     } else {
       distance = -1;
       unoRightColor = "Error";
+      Serial.println("Invalid UNO data format: " + data);
     }
     
     Serial.print("UNO Data - Distance: "); Serial.print(distance);
-    Serial.print(", Color: "); Serial.println(unoRightColor);
+    Serial.print(", Color: "); Serial.print(unoRightColor);
+    Serial.print(", Obstacle Count: "); Serial.println(obstacleWarningCount);
   } else {
     Serial.println("Invalid UNO data format: " + data);
   }
@@ -252,7 +259,6 @@ void parseTcsData(String data) {
     data = data.substring(4); // Remove "TCS:"
     nanoLeftColor = data;
     
-    // 데이터 유효성 검사
     if (nanoLeftColor != "White" && nanoLeftColor != "Black" && nanoLeftColor != "Error") {
       nanoLeftColor = "Other";
     }
@@ -277,9 +283,8 @@ void parseMpuData(String data) {
         String countStr = data.substring(colonIndex + 1);
         int newCount = countStr.toInt();
         
-        // 급제동 횟수가 증가했을 때만 점수 감점
         if (newCount > hardBrakeCount) {
-          drivingScore -= 5; // 급제동 1회당 5점 감점
+          drivingScore -= 5;
           if (drivingScore < 0) drivingScore = 0;
           Serial.print("Penalty! Hard Brake Detected. New Score: ");
           Serial.println(drivingScore);
@@ -336,31 +341,7 @@ void detectLaneChangeAndType(String leftColor, String rightColor) {
 
 // Function to calculate driving score
 void calculateScore() {
-  unsigned long currentTime = millis();
-
-  // 차선 변경 감지 (좌측 또는 우측 센서에서 흰색 감지)
   detectLaneChangeAndType(nanoLeftColor, unoRightColor);
-
-  // 앞 차와의 거리 체크 (30cm 미만일 때 경고)
-  if (distance > 0 && distance < 30 && currentTime - lastObstacleWarningTime > OBSTACLE_WARNING_COOLDOWN) {
-    obstacleWarningCount++;
-    drivingScore -= 3;
-    if (drivingScore < 0) drivingScore = 0;
-    lastObstacleWarningTime = currentTime;
-    Serial.print("Close obstacle detected! Distance: ");
-    Serial.print(distance);
-    Serial.println("cm");
-  }
-
-  // 점수가 음수가 되지 않도록 제한
-  if (drivingScore < 0) {
-    drivingScore = 0;
-  }
-  
-  // 최대 점수 제한 (선택사항)
-  if (drivingScore > 100) {
-    drivingScore = 100;
-  }
 }
 
 // Function to display score on LCD
