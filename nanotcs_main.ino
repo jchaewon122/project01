@@ -32,40 +32,41 @@ void setup() {
 }
 
 void loop() {
-  // Update and send sensor values every 50ms
-  static unsigned long lastSensorReadTime = 0;
-  unsigned long currentTime = millis();
+  // Listen for command from master (Orange Board)
+  if (orangeBleSerial.available()) {
+    String command = orangeBleSerial.readStringUntil('\n');
+    command.trim();
 
-  if (currentTime - lastSensorReadTime >= 50) {
-    lastSensorReadTime = currentTime;
+    // If the command is "GET_TCS", update and send data
+    if (command == "GET_TCS") {
+      if (tcsSensorFound) {
+        uint16_t r, g, b, c;
+        tcs.getRawData(&r, &g, &b, &c);
 
-    if (tcsSensorFound) {
-      uint16_t r, g, b, c;
-      tcs.getRawData(&r, &g, &b, &c);
+        long rgbSum = r + g + b;
 
-      long rgbSum = r + g + b;
+        // Classify color as "Black" or "White" based on RGB sum
+        if (rgbSum < 3000) {
+          currentColorStatus = "Black";
+        } else {
+          currentColorStatus = "White";
+        }
 
-      // Classify color as "Black" or "White" based on RGB sum
-      if (rgbSum < 3000) {
-        currentColorStatus = "Black";
+        // Print to Serial Monitor for debug
+        Serial.print("R: "); Serial.print(r);
+        Serial.print(", G: "); Serial.print(g);
+        Serial.print(", B: "); Serial.print(b);
+        Serial.print(", C: "); Serial.print(c);
+        Serial.print(" -> Color: "); Serial.println(currentColorStatus);
+
       } else {
-        currentColorStatus = "White";
+        currentColorStatus = "Error"; // Sensor initialization failed
+        Serial.println("R: Error, G: Error, B: Error, C: Error -> Color: Error");
       }
 
-      // Print to Serial Monitor for debug
-      Serial.print("R: "); Serial.print(r);
-      Serial.print(", G: "); Serial.print(g);
-      Serial.print(", B: "); Serial.print(b);
-      Serial.print(", C: "); Serial.print(c);
-      Serial.print(" -> Color: "); Serial.println(currentColorStatus);
-
-    } else {
-      currentColorStatus = "Error"; // Sensor initialization failed
-      Serial.println("R: Error, G: Error, B: Error, C: Error -> Color: Error");
+      // Transmit data to Orange BLE with a unique ID
+      orangeBleSerial.print("NANO_TCS:");
+      orangeBleSerial.println(currentColorStatus);
     }
-
-    // Transmit data to Orange BLE with a unique ID
-    orangeBleSerial.print("NANO_TCS:");
-    orangeBleSerial.println(currentColorStatus);
   }
 }
