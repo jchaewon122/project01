@@ -72,18 +72,15 @@ void loop() {
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
 
-  // Check for commands from master
   if (orangeSerial.available()) {
     String command = orangeSerial.readStringUntil('\n');
     command.trim();
 
-    // Check for data request
     if (command == "REQ_DATA") {
       sendDataToMaster();
     }
   }
 
-  // Sensor reading and processing
   if (currentTime - lastSensorReadTime >= 50) {
     lastSensorReadTime = currentTime;
     processMPUData(currentTime);
@@ -94,7 +91,6 @@ void sendDataToMaster() {
   orangeSerial.print("MPU:HardBrakeCount:");
   orangeSerial.println(hardBrakeCount);
   
-  // 전송 완료 대기
   orangeSerial.flush();
   
   Serial.print("Sent to master - HardBrake Count: ");
@@ -105,22 +101,18 @@ void processMPUData(unsigned long currentTime) {
   if (mpuSensorFound) {
     float accelX, accelY, accelZ;
     if (readAcceleration(accelX, accelY, accelZ)) {
-      // 캘리브레이션 오프셋 적용
       accelX -= accelXOffset;
       accelY -= accelYOffset;
       accelZ -= accelZOffset;
       
-      // Y축을 전진 방향 가속도로 사용 (차량이 앞으로 갈 때 +, 뒤로 갈 때 -)
       float forwardAccel = accelY;
       
-      // 이동 평균 필터 적용
       accelBuffer[bufferIndex] = forwardAccel;
       bufferIndex = (bufferIndex + 1) % FILTER_SIZE;
       if (bufferIndex == 0) bufferFilled = true;
       
       float smoothedAccel = getMovingAverage();
 
-      // 급제동 감지: 음수이고 절댓값이 기준값보다 클 때
       if (currentTime - lastHardBrakeTime > BRAKE_DETECTION_COOLDOWN) {
         if (smoothedAccel < hardBrakeThreshold && bufferFilled) {
           lastHardBrakeTime = currentTime;
@@ -201,7 +193,7 @@ bool readAcceleration(float &x, float &y, float &z) {
   Wire.beginTransmission(MPU6500_ADDRESS);
   Wire.write(ACCEL_XOUT_H);
   if (Wire.endTransmission(false) != 0) {
-    return false; // I2C 통신 에러
+    return false;
   }
   
   Wire.requestFrom(MPU6500_ADDRESS, 6, true);
