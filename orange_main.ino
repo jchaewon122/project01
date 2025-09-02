@@ -5,8 +5,8 @@
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // Single Software serial communication for all slave boards
-// 오렌지보드 RX(데이터 받는 핀) -> 슬레이브보드 TX
-// 오렌지보드 TX(데이터 보내는 핀) -> 슬레이브보드 RX
+// Orange RX(D6) -> Slave TX
+// Orange TX(D7) -> Slave RX
 SoftwareSerial slaveSerial(6, 7);
 
 // Driving score and penalty factors
@@ -28,8 +28,6 @@ unsigned long lineDetectionStartTime = 0;
 const unsigned long SOLID_LINE_MIN_DURATION = 800; // Solid line if on for > 0.8s
 
 // Debouncing for hard brake and obstacle warnings
-unsigned long lastHardBrakeTime = 0;
-const unsigned long HARD_BRAKE_COOLDOWN = 2000;
 unsigned long lastObstacleWarningTime = 0;
 const unsigned long OBSTACLE_WARNING_COOLDOWN = 1000;
 
@@ -43,6 +41,12 @@ int distance = -1;
 String unoRightColor = "Other";
 String nanoLeftColor = "Other";
 String brakeStatus = "Normal";
+
+// Timing variables for Master-Slave requests
+unsigned long lastRequestTime = 0;
+const unsigned long SHORT_REQUEST_INTERVAL = 500; // UNO and NANO TCS
+const unsigned long LONG_REQUEST_INTERVAL = 10000; // NANO MPU
+int requestState = 0; // 0: UNO, 1: NANO TCS, 2: NANO MPU
 
 void setup() {
   Serial.begin(9600); // For PC debug monitor
@@ -60,10 +64,34 @@ void setup() {
 }
 
 void loop() {
-  // Read data from a single serial stream and parse by ID
-  String slaveData = readSlaveData(slaveSerial);
-  if (slaveData != "") {
-    parseAndProcessData(slaveData);
+  unsigned long currentTime = millis();
+
+  // Master-Slave request logic
+  if (currentTime - lastRequestTime >= SHORT_REQUEST_INTERVAL) {
+    lastRequestTime = currentTime;
+
+    // Cycle through slaves
+    switch (requestState) {
+      case 0: // Request from UNO
+        slaveSerial.println("GET_UNO");
+        break;
+      case 1: // Request from NANO TCS
+        slaveSerial.println("GET_TCS");
+        break;
+      case 2: // Request from NANO MPU (less frequent)
+        if (currentTime - lastRequestTime >= LONG_REQUEST_INTERVAL) {
+           slaveSerial.println("GET_MPU");
+           lastRequestTime = currentTime;
+        }
+        break;
+    }
+    
+    // Read and process data after a brief delay for the slave to respond
+    delay(20);
+    String slaveData = readSlaveData(slaveSerial);
+    if (slaveData != "") {
+      parseAndProcessData(slaveData);
+    }
   }
 
   // Calculate score based on sensor data
@@ -71,7 +99,6 @@ void loop() {
 
   // Update LCD display and send score to Uno every 500ms
   static unsigned long lastDisplayTime = 0;
-  unsigned long currentTime = millis();
   if (currentTime - lastDisplayTime >= 500) {
     lastDisplayTime = currentTime;
     displayOnLcd();
@@ -86,7 +113,7 @@ void loop() {
     Serial.print("Parsed - Dist: "); Serial.print(distance);
     Serial.print(" | Left: "); Serial.print(unoRightColor);
     Serial.print(" | Right: "); Serial.print(nanoLeftColor);
-    Serial.print(" | Brake: "); Serial.println(brakeStatus);
+    Serial.print(" | Hardbrake: "); Serial.println(hardBrakeCount);
     Serial.print("State: "); Serial.print(currentLaneState == ON_ROAD ? "ON_ROAD" : "ON_LINE");
     Serial.print(" | Score: "); Serial.println(drivingScore);
     Serial.println("---");
@@ -120,8 +147,14 @@ void parseAndProcessData(String data) {
     if (nanoLeftColor == "Error") nanoTcsError = true; else nanoTcsError = false;
   } else if (data.startsWith("NANO_MPU:")) {
     data = data.substring(9); // Remove "NANO_MPU:"
-    brakeStatus = data;
-    if (brakeStatus == "Error") nanoMpuError = true; else nanoMpuError = false;
+    // This is the new logic to get the hard brake count from Nano MPU
+    int colonIndex = data.indexOf(':');
+    if (colonIndex != -1) {
+        String status = data.substring(0, colonIndex);
+        if (status == "HardBrakeCount") {
+            hardBrakeCount = data.substring(colonIndex + 1).toInt();
+        }
+    }
   }
 }
 
