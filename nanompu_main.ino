@@ -15,19 +15,18 @@ SoftwareSerial orangeBleSerial(2, 3);
 #define ACCEL_XOUT_H    0x3B
 
 // Variables for hard brake detection
-// Changed the threshold to be less aggressive, based on previous test data.
 float hardBrakeThreshold = -3.0; // Negative acceleration threshold for hard brake (m/s²)
-float prevVelocity = 0.0;
-float velocity = 0.0;
 unsigned long lastHardBrakeTime = 0;
 const unsigned long BRAKE_DETECTION_COOLDOWN = 1000; // 1s cooldown
 bool mpuSensorFound = false;
+
+// New variable to store the count of hard brakes
+int hardBrakeCount = 0;
 
 // Acceleration scale factor (±8g range)
 const float ACCEL_SCALE = 8.0 / 32768.0 * 9.81; // m/s² conversion
 
 // Moving average filter for smoothing
-// Reduced filter size for faster reaction to sudden changes.
 const int FILTER_SIZE = 3;
 float accelBuffer[FILTER_SIZE];
 int bufferIndex = 0;
@@ -77,15 +76,13 @@ void setup() {
 }
 
 void loop() {
-  // Update sensor values every 50ms (20Hz)
+  // Continuously run sensor logic to update hard brake count, regardless of master request
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
 
   if (currentTime - lastSensorReadTime >= 50) {
     lastSensorReadTime = currentTime;
-    float deltaTime = 0.05; // 50ms = 0.05 seconds
 
-    String currentBrakeStatus = "Normal";
     if (mpuSensorFound) {
       float accelX, accelY, accelZ;
 
@@ -108,8 +105,8 @@ void loop() {
         // Hard brake detection: when negative acceleration is greater than the threshold
         if (currentTime - lastHardBrakeTime > BRAKE_DETECTION_COOLDOWN) {
           if (smoothedAccel < hardBrakeThreshold && bufferFilled) {
-            currentBrakeStatus = "HardBrake";
             lastHardBrakeTime = currentTime;
+            hardBrakeCount++; // Increment the hard brake counter
           }
         }
 
@@ -118,20 +115,27 @@ void loop() {
         Serial.print(", Y: "); Serial.print(accelY, 2);
         Serial.print(", Z: "); Serial.print(accelZ, 2);
         Serial.print(", Smoothed: "); Serial.print(smoothedAccel, 2);
-        Serial.print(", Status: "); Serial.println(currentBrakeStatus);
-
+        Serial.print(", HB Count: "); Serial.println(hardBrakeCount);
+        
       } else {
-        currentBrakeStatus = "Error";
         Serial.println("Failed to read acceleration data");
       }
     } else {
-      currentBrakeStatus = "Error";
       Serial.println("MPU sensor not found");
     }
+  }
 
-    // Transmit data to Orange BLE with a unique ID
-    orangeBleSerial.print("NANO_MPU:");
-    orangeBleSerial.println(currentBrakeStatus);
+  // Listen for a command from the master (Orange Board)
+  if (orangeBleSerial.available()) {
+    String command = orangeBleSerial.readStringUntil('\n');
+    command.trim();
+
+    // If the command is "GET_MPU", send the data
+    if (command == "GET_MPU") {
+      // Transmit only the hard brake count to Orange BLE
+      orangeBleSerial.print("NANO_MPU:HardBrakeCount:");
+      orangeBleSerial.println(hardBrakeCount);
+    }
   }
 }
 
