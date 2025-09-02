@@ -1,16 +1,16 @@
 #include <Adafruit_TCS34725.h>
 
-// TCS34725 센서 설정
+// TCS34725 sensor configuration
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_1X);
 
-// 센서 데이터 저장용 변수
+// Global variables for sensor data
 String currentColorStatus = "Other";
 bool tcsSensorFound = false;
 
 void setup() {
-  Serial.begin(9600); // 오렌지 BLE와의 시리얼 통신 시작
+  Serial.begin(9600); // Start serial communication with Orange BLE
   
-  // TCS 센서 초기화
+  // Initialize TCS sensor
   if (tcs.begin()) {
     Serial.println("NANO1: Found TCS34725 sensor!");
     tcsSensorFound = true;
@@ -23,7 +23,7 @@ void setup() {
 }
 
 void loop() {
-  // 50ms 주기로 센서 값을 업데이트하고 전송
+  // Update and send sensor values every 50ms
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
   
@@ -47,7 +47,7 @@ void loop() {
       currentColorStatus = "Error";
     }
     
-    // 데이터 전송
+    // Transmit data
     Serial.println(currentColorStatus);
   }
 }
