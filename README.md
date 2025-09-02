@@ -6,6 +6,7 @@
 - Adafruit TCS34725
 - NewPing
 - LiquidCrystal I2C (by Marco Schwartz)
+- SoftwareSerial
 
 ## Note by GPT
 
