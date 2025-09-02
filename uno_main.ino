@@ -4,7 +4,9 @@
 #include <LiquidCrystal_I2C.h>
 
 // Software serial communication with Orange BLE
-SoftwareSerial orangeBleSerial(2, 3); // RX: D2, TX: D3
+// Connect TX pin of Uno (D2) to RX pin of Orange BLE (D6)
+// Connect RX pin of Uno (D3) to TX pin of Orange BLE (D7)
+SoftwareSerial orangeBleSerial(2, 3);
 
 // LCD I2C address (default is 0x27)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -20,13 +22,9 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_154MS, TCS347
 long currentDistance = -1;
 String currentColorStatus = "Other";
 bool tcsSensorFound = false;
-int receivedScore = 0;
-
-// 시리얼 모니터 출력을 위한 변수들
-uint16_t lastR = 0, lastG = 0, lastB = 0, lastC = 0;
 
 void setup() {
-  Serial.begin(9600); // For debug monitor
+  Serial.begin(9600); // For PC debug monitor
   orangeBleSerial.begin(9600); // Start serial communication with Orange BLE
 
   pinMode(TRIG_PIN, OUTPUT);
@@ -35,10 +33,10 @@ void setup() {
   // Initialize TCS sensor
   if (tcs.begin()) {
     tcsSensorFound = true;
-    Serial.println("TCS34725 sensor found!");
+    Serial.println("UNO: Found TCS34725 sensor!");
   } else {
     tcsSensorFound = false;
-    Serial.println("TCS34725 sensor not found!");
+    Serial.println("UNO: No TCS34725 sensor found!");
   }
 
   // Initialize LCD
@@ -59,7 +57,8 @@ void loop() {
     lastSensorReadTime = currentTime;
     updateSensorData();
 
-    // Transmit data to Orange BLE (거리, 오른쪽 컬러)
+    // Transmit data to Orange BLE with a unique ID
+    orangeBleSerial.print("UNO:");
     orangeBleSerial.print(currentDistance);
     orangeBleSerial.print(",");
     orangeBleSerial.println(currentColorStatus);
@@ -67,33 +66,18 @@ void loop() {
 
   // Check for incoming data (score) from Orange BLE
   if (orangeBleSerial.available()) {
-    String incomingData = orangeBleSerial.readStringUntil('\n');
-    incomingData.trim();
-    
-    // SCORE: 형태로 온다고 가정
-    if (incomingData.startsWith("SCORE:")) {
-      String scoreString = incomingData.substring(6);
-      receivedScore = scoreString.toInt();
+    String data = orangeBleSerial.readStringUntil('\n');
+    data.trim();
+    if (data.startsWith("SCORE:")) {
+      String scoreString = data.substring(6);
+      int receivedScore = scoreString.toInt();
 
       // Display the received score on the LCD
-      updateLCD();
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Score:");
+      lcd.print(receivedScore);
     }
-  }
-
-  // 시리얼 모니터 출력 (1초마다)
-  static unsigned long lastSerialOutput = 0;
-  if (currentTime - lastSerialOutput >= 1000) {
-    lastSerialOutput = currentTime;
-    Serial.print("Distance: ");
-    Serial.print(currentDistance);
-    Serial.print(" cm, R: ");
-    Serial.print(lastR);
-    Serial.print(", G: ");
-    Serial.print(lastG);
-    Serial.print(", B: ");
-    Serial.print(lastB);
-    Serial.print(", C: ");
-    Serial.println(lastC);
   }
 }
 
@@ -110,26 +94,15 @@ void updateSensorData() {
 
   if (duration > 0) {
     long newDistance = (duration / 2) / 29.1;
-    // 거리가 너무 크면 제한
-    if (newDistance > 400) {
-      currentDistance = 400;
-    } else {
-      currentDistance = newDistance;
-    }
+    currentDistance = newDistance;
   } else {
     currentDistance = -1;
   }
 
-  // Read data from TCS color sensor (오른쪽 컬러)
+  // Read data from TCS color sensor
   if (tcsSensorFound) {
     uint16_t r, g, b, c;
     tcs.getRawData(&r, &g, &b, &c);
-    
-    // 시리얼 모니터 출력을 위해 저장
-    lastR = r;
-    lastG = g;
-    lastB = b;
-    lastC = c;
 
     long rgbSum = r + g + b;
 
@@ -139,20 +112,14 @@ void updateSensorData() {
     } else {
       currentColorStatus = "White";
     }
+
+    // Print to Serial Monitor for debug
+    Serial.print("Distance: "); Serial.print(currentDistance); Serial.print(" cm, ");
+    Serial.print("R: "); Serial.print(r); Serial.print(", G: "); Serial.print(g); Serial.print(", B: "); Serial.print(b); Serial.print(", C: "); Serial.print(c);
+    Serial.print(" -> Color: "); Serial.println(currentColorStatus);
+
   } else {
     currentColorStatus = "Error"; // Sensor initialization failed
+    Serial.println("Distance: Error, Color: Error");
   }
-}
-
-// LCD 업데이트 함수
-void updateLCD() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Score: ");
-  lcd.print(receivedScore);
-  
-  lcd.setCursor(0, 1);
-  lcd.print("Dist: ");
-  lcd.print(currentDistance);
-  lcd.print("cm");
 }
