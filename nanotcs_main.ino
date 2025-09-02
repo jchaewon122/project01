@@ -3,7 +3,9 @@
 #include <Adafruit_TCS34725.h>
 
 // Software serial communication with Orange BLE
-SoftwareSerial orangeBleSerial(2, 3); // RX: D2, TX: D3
+// Connect TX pin of Nano TCS (D2) to RX pin of Orange BLE (D6)
+// Connect RX pin of Nano TCS (D3) to TX pin of Orange BLE (D7)
+SoftwareSerial orangeBleSerial(2, 3);
 
 // TCS34725 sensor object setup
 // Integration Time is 154ms, Gain is 16X for maximum sensitivity
@@ -13,23 +15,20 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_154MS, TCS347
 String currentColorStatus = "Other";
 bool tcsSensorFound = false;
 
-// 시리얼 모니터 출력을 위한 변수들
-uint16_t lastR = 0, lastG = 0, lastB = 0, lastC = 0;
-
 void setup() {
-  Serial.begin(9600); // For debug monitor
-  orangeBleSerial.begin(9600); // Start serial communication with Orange BLE
+  Serial.begin(9600); // For PC debug monitor
+  orangeBleSerial.begin(9600);
 
   // Initialize TCS sensor
   if (tcs.begin()) {
-    Serial.println("NANO TCS: Found TCS34725 sensor!");
     tcsSensorFound = true;
+    Serial.println("NANO_TCS: Found TCS34725 sensor!");
   } else {
-    Serial.println("NANO TCS: No TCS34725 sensor found!");
     tcsSensorFound = false;
+    Serial.println("NANO_TCS: No TCS34725 sensor found!");
   }
 
-  Serial.println("NANO TCS Slave initialized");
+  Serial.println("NANO_TCS Slave initialized");
 }
 
 void loop() {
@@ -43,12 +42,6 @@ void loop() {
     if (tcsSensorFound) {
       uint16_t r, g, b, c;
       tcs.getRawData(&r, &g, &b, &c);
-      
-      // 시리얼 모니터 출력을 위해 저장
-      lastR = r;
-      lastG = g;
-      lastB = b;
-      lastC = c;
 
       long rgbSum = r + g + b;
 
@@ -58,27 +51,21 @@ void loop() {
       } else {
         currentColorStatus = "White";
       }
+
+      // Print to Serial Monitor for debug
+      Serial.print("R: "); Serial.print(r);
+      Serial.print(", G: "); Serial.print(g);
+      Serial.print(", B: "); Serial.print(b);
+      Serial.print(", C: "); Serial.print(c);
+      Serial.print(" -> Color: "); Serial.println(currentColorStatus);
+
     } else {
       currentColorStatus = "Error"; // Sensor initialization failed
+      Serial.println("R: Error, G: Error, B: Error, C: Error -> Color: Error");
     }
 
-    // Transmit data to Orange BLE (왼쪽 컬러)
+    // Transmit data to Orange BLE with a unique ID
+    orangeBleSerial.print("NANO_TCS:");
     orangeBleSerial.println(currentColorStatus);
-  }
-
-  // 시리얼 모니터 출력 (1초마다)
-  static unsigned long lastSerialOutput = 0;
-  if (currentTime - lastSerialOutput >= 1000) {
-    lastSerialOutput = currentTime;
-    Serial.print("R: ");
-    Serial.print(lastR);
-    Serial.print(", G: ");
-    Serial.print(lastG);
-    Serial.print(", B: ");
-    Serial.print(lastB);
-    Serial.print(", C: ");
-    Serial.print(lastC);
-    Serial.print(" -> Color: ");
-    Serial.println(currentColorStatus);
   }
 }
