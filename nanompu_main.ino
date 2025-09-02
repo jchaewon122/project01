@@ -15,7 +15,8 @@ SoftwareSerial orangeBleSerial(2, 3);
 #define ACCEL_XOUT_H    0x3B
 
 // Variables for hard brake detection
-float hardBrakeThreshold = -8.0; // Negative acceleration threshold for hard brake (m/s²)
+// Changed the threshold to be less aggressive, based on previous test data.
+float hardBrakeThreshold = -3.0; // Negative acceleration threshold for hard brake (m/s²)
 float prevVelocity = 0.0;
 float velocity = 0.0;
 unsigned long lastHardBrakeTime = 0;
@@ -26,7 +27,8 @@ bool mpuSensorFound = false;
 const float ACCEL_SCALE = 8.0 / 32768.0 * 9.81; // m/s² conversion
 
 // Moving average filter for smoothing
-const int FILTER_SIZE = 5;
+// Reduced filter size for faster reaction to sudden changes.
+const int FILTER_SIZE = 3;
 float accelBuffer[FILTER_SIZE];
 int bufferIndex = 0;
 bool bufferFilled = false;
