@@ -2,13 +2,14 @@
 #include <Wire.h>
 #include <math.h>
 
-SoftwareSerial orangeBleSerial(2, 3);
+SoftwareSerial orangeSerial(2, 3);
 
+#define SLAVE_ID 3
 #define MPU6500_ADDRESS 0x68
-#define WHO_AM_I        0x75
-#define PWR_MGMT_1      0x6B
-#define PWR_MGMT_2      0x6C
-#define ACCEL_XOUT_H    0x3B
+#define WHO_AM_I         0x75
+#define PWR_MGMT_1       0x6B
+#define PWR_MGMT_2       0x6C
+#define ACCEL_XOUT_H     0x3B
 
 float hardBrakeThreshold = -3.0;
 unsigned long lastHardBrakeTime = 0;
@@ -25,9 +26,20 @@ float accelYOffset = 0.0;
 float accelZOffset = 0.0;
 bool calibrated = false;
 
+// 함수 선언
+void sendDataToMaster();
+void processMPUData(unsigned long currentTime);
+void calibrateSensor();
+float getMovingAverage();
+bool initializeMPU6500();
+void configureMPU6500();
+bool readAcceleration(float &x, float &y, float &z);
+uint8_t readRegister(uint8_t reg);
+void writeRegister(uint8_t reg, uint8_t value);
+
 void setup() {
   Serial.begin(9600);
-  orangeBleSerial.begin(9600);
+  orangeSerial.begin(9600);
 
   for (int i = 0; i < FILTER_SIZE; i++) {
     accelBuffer[i] = 0.0;
@@ -51,52 +63,76 @@ void setup() {
     Serial.println("NANO_MPU: Failed to find MPU6500 chip");
     mpuSensorFound = false;
   }
+
+  Serial.print("NANO_MPU Slave initialized with ID: ");
+  Serial.println(SLAVE_ID);
 }
 
 void loop() {
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
 
-  if (currentTime - lastSensorReadTime >= 50) {
-    lastSensorReadTime = currentTime;
-    if (mpuSensorFound) {
-      float accelX, accelY, accelZ;
-      if (readAcceleration(accelX, accelY, accelZ)) {
-        accelX -= accelXOffset;
-        accelY -= accelYOffset;
-        accelZ -= accelZOffset;
-        float forwardAccel = accelY;
-        accelBuffer[bufferIndex] = forwardAccel;
-        bufferIndex = (bufferIndex + 1) % FILTER_SIZE;
-        if (bufferIndex == 0) bufferFilled = true;
-        float smoothedAccel = getMovingAverage();
+  // Check for commands from master
+  if (orangeSerial.available()) {
+    String command = orangeSerial.readStringUntil('\n');
+    command.trim();
 
-        if (currentTime - lastHardBrakeTime > BRAKE_DETECTION_COOLDOWN) {
-          if (smoothedAccel < hardBrakeThreshold && bufferFilled) {
-            lastHardBrakeTime = currentTime;
-            hardBrakeCount++;
-          }
-        }
-        Serial.print("X: "); Serial.print(accelX, 2);
-        Serial.print(", Y: "); Serial.print(accelY, 2);
-        Serial.print(", Z: "); Serial.print(accelZ, 2);
-        Serial.print(", Smoothed: "); Serial.print(smoothedAccel, 2);
-        Serial.print(", HB Count: "); Serial.println(hardBrakeCount);
-      } else {
-        Serial.println("Failed to read acceleration data");
-      }
-    } else {
-      Serial.println("MPU sensor not found");
+    // Check for data request
+    if (command == "REQ_DATA") {
+      sendDataToMaster();
     }
   }
 
-  if (orangeBleSerial.available()) {
-    String command = orangeBleSerial.readStringUntil('\n');
-    command.trim();
+  // Sensor reading and processing
+  if (currentTime - lastSensorReadTime >= 50) {
+    lastSensorReadTime = currentTime;
+    processMPUData(currentTime);
+  }
+}
 
-    if (command == "GET_MPU") {
-      orangeBleSerial.print("NANO_MPU:HardBrakeCount:");
-      orangeBleSerial.println(hardBrakeCount);
+void sendDataToMaster() {
+  orangeSerial.print("MPU:HardBrakeCount:");
+  orangeSerial.println(hardBrakeCount);
+  
+  // 전송 완료 대기
+  orangeSerial.flush();
+  
+  Serial.print("Sent to master - HardBrake Count: ");
+  Serial.println(hardBrakeCount);
+}
+
+void processMPUData(unsigned long currentTime) {
+  if (mpuSensorFound) {
+    float accelX, accelY, accelZ;
+    if (readAcceleration(accelX, accelY, accelZ)) {
+      // 캘리브레이션 오프셋 적용
+      accelX -= accelXOffset;
+      accelY -= accelYOffset;
+      accelZ -= accelZOffset;
+      
+      // Y축을 전진 방향 가속도로 사용 (차량이 앞으로 갈 때 +, 뒤로 갈 때 -)
+      float forwardAccel = accelY;
+      
+      // 이동 평균 필터 적용
+      accelBuffer[bufferIndex] = forwardAccel;
+      bufferIndex = (bufferIndex + 1) % FILTER_SIZE;
+      if (bufferIndex == 0) bufferFilled = true;
+      
+      float smoothedAccel = getMovingAverage();
+
+      // 급제동 감지: 음수이고 절댓값이 기준값보다 클 때
+      if (currentTime - lastHardBrakeTime > BRAKE_DETECTION_COOLDOWN) {
+        if (smoothedAccel < hardBrakeThreshold && bufferFilled) {
+          lastHardBrakeTime = currentTime;
+          hardBrakeCount++;
+          Serial.print("Hard brake detected! Accel: ");
+          Serial.print(smoothedAccel, 3);
+          Serial.print(" m/s², Count: ");
+          Serial.println(hardBrakeCount);
+        }
+      }
+    } else {
+      Serial.println("Failed to read MPU acceleration data");
     }
   }
 }
@@ -164,12 +200,16 @@ void configureMPU6500() {
 bool readAcceleration(float &x, float &y, float &z) {
   Wire.beginTransmission(MPU6500_ADDRESS);
   Wire.write(ACCEL_XOUT_H);
-  Wire.endTransmission(false);
+  if (Wire.endTransmission(false) != 0) {
+    return false; // I2C 통신 에러
+  }
+  
   Wire.requestFrom(MPU6500_ADDRESS, 6, true);
   if (Wire.available() >= 6) {
     int16_t rawX = (Wire.read() << 8) | Wire.read();
     int16_t rawY = (Wire.read() << 8) | Wire.read();
     int16_t rawZ = (Wire.read() << 8) | Wire.read();
+    
     x = rawX * ACCEL_SCALE;
     y = rawY * ACCEL_SCALE;
     z = rawZ * ACCEL_SCALE;
