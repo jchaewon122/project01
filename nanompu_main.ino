@@ -3,7 +3,9 @@
 #include <math.h>
 
 // Software serial communication with Orange BLE
-SoftwareSerial orangeBleSerial(2, 3); // RX: D2, TX: D3
+// Connect TX pin of Nano MPU (D2) to RX pin of Orange BLE (D6)
+// Connect RX pin of Nano MPU (D3) to TX pin of Orange BLE (D7)
+SoftwareSerial orangeBleSerial(2, 3);
 
 // MPU6500 I2C address and registers
 #define MPU6500_ADDRESS 0x68
@@ -13,8 +15,9 @@ SoftwareSerial orangeBleSerial(2, 3); // RX: D2, TX: D3
 #define ACCEL_XOUT_H    0x3B
 
 // Variables for hard brake detection
-float accelThreshold = 12.0; // Hard brake threshold (m/s²)
-float prevAccelMagnitude = 0.0;
+float hardBrakeThreshold = -8.0; // Negative acceleration threshold for hard brake (m/s²)
+float prevVelocity = 0.0;
+float velocity = 0.0;
 unsigned long lastHardBrakeTime = 0;
 const unsigned long BRAKE_DETECTION_COOLDOWN = 1000; // 1s cooldown
 bool mpuSensorFound = false;
@@ -22,12 +25,26 @@ bool mpuSensorFound = false;
 // Acceleration scale factor (±8g range)
 const float ACCEL_SCALE = 8.0 / 32768.0 * 9.81; // m/s² conversion
 
-// 시리얼 모니터 출력을 위한 변수들
-float lastAccelX = 0, lastAccelY = 0, lastAccelZ = 0;
+// Moving average filter for smoothing
+const int FILTER_SIZE = 5;
+float accelBuffer[FILTER_SIZE];
+int bufferIndex = 0;
+bool bufferFilled = false;
+
+// Calibration values
+float accelXOffset = 0.0;
+float accelYOffset = 0.0;
+float accelZOffset = 0.0;
+bool calibrated = false;
 
 void setup() {
-  Serial.begin(9600); // For debug monitor
-  orangeBleSerial.begin(9600); // Start serial communication with Orange BLE
+  Serial.begin(9600); // For PC debug monitor
+  orangeBleSerial.begin(9600); // For Orange BLE communication
+
+  // Initialize buffer
+  for (int i = 0; i < FILTER_SIZE; i++) {
+    accelBuffer[i] = 0.0;
+  }
 
   // I2C initialization
   Wire.begin();
@@ -36,111 +53,138 @@ void setup() {
 
   // Initialize MPU6500 sensor
   if (initializeMPU6500()) {
-    Serial.println("NANO MPU: Found MPU6500 sensor!");
+    Serial.println("NANO_MPU: Found MPU6500 sensor!");
     mpuSensorFound = true;
 
     // MPU6500 configuration
     configureMPU6500();
     delay(100);
 
+    // Sensor calibration (must be done while stationary)
+    calibrateSensor();
+
     // Test read
     float testX, testY, testZ;
     if (readAcceleration(testX, testY, testZ)) {
-      Serial.println("NANO MPU: Sensor test read successful!");
+      Serial.println("NANO_MPU: Sensor test read successful!");
     }
   } else {
-    Serial.println("NANO MPU: Failed to find MPU6500 chip");
+    Serial.println("NANO_MPU: Failed to find MPU6500 chip");
     mpuSensorFound = false;
   }
-
-  Serial.println("NANO MPU Slave initialized");
 }
 
 void loop() {
-  // Update sensor values every 20ms
+  // Update sensor values every 50ms (20Hz)
   static unsigned long lastSensorReadTime = 0;
   unsigned long currentTime = millis();
 
-  if (currentTime - lastSensorReadTime >= 20) {
+  if (currentTime - lastSensorReadTime >= 50) {
     lastSensorReadTime = currentTime;
+    float deltaTime = 0.05; // 50ms = 0.05 seconds
 
     String currentBrakeStatus = "Normal";
-    
     if (mpuSensorFound) {
       float accelX, accelY, accelZ;
 
       if (readAcceleration(accelX, accelY, accelZ)) {
-        // 시리얼 모니터 출력을 위해 저장
-        lastAccelX = accelX;
-        lastAccelY = accelY;
-        lastAccelZ = accelZ;
-        
-        float accelMagnitude = sqrt(
-          accelX * accelX +
-          accelY * accelY +
-          accelZ * accelZ
-        );
+        // Apply calibration
+        accelX -= accelXOffset;
+        accelY -= accelYOffset;
+        accelZ -= accelZOffset;
 
-        float accelChange = abs(accelMagnitude - prevAccelMagnitude);
+        // Forward acceleration (Y-axis is usually the forward direction)
+        float forwardAccel = accelY;
 
+        // Apply moving average filter
+        accelBuffer[bufferIndex] = forwardAccel;
+        bufferIndex = (bufferIndex + 1) % FILTER_SIZE;
+        if (bufferIndex == 0) bufferFilled = true;
+
+        float smoothedAccel = getMovingAverage();
+
+        // Hard brake detection: when negative acceleration is greater than the threshold
         if (currentTime - lastHardBrakeTime > BRAKE_DETECTION_COOLDOWN) {
-          // 급제동 감지 로직 개선
-          if (accelZ > accelThreshold || accelChange > 8.0) {
+          if (smoothedAccel < hardBrakeThreshold && bufferFilled) {
             currentBrakeStatus = "HardBrake";
             lastHardBrakeTime = currentTime;
           }
         }
-        
-        prevAccelMagnitude = accelMagnitude;
+
+        // Print to Serial Monitor for debug
+        Serial.print("X: "); Serial.print(accelX, 2);
+        Serial.print(", Y: "); Serial.print(accelY, 2);
+        Serial.print(", Z: "); Serial.print(accelZ, 2);
+        Serial.print(", Smoothed: "); Serial.print(smoothedAccel, 2);
+        Serial.print(", Status: "); Serial.println(currentBrakeStatus);
+
       } else {
         currentBrakeStatus = "Error";
+        Serial.println("Failed to read acceleration data");
       }
     } else {
       currentBrakeStatus = "Error";
+      Serial.println("MPU sensor not found");
     }
 
-    // Transmit data to Orange BLE
+    // Transmit data to Orange BLE with a unique ID
+    orangeBleSerial.print("NANO_MPU:");
     orangeBleSerial.println(currentBrakeStatus);
   }
+}
 
-  // 시리얼 모니터 출력 (1초마다)
-  static unsigned long lastSerialOutput = 0;
-  if (currentTime - lastSerialOutput >= 1000) {
-    lastSerialOutput = currentTime;
-    Serial.print("AccelX: ");
-    Serial.print(lastAccelX, 2);
-    Serial.print(" m/s², AccelY: ");
-    Serial.print(lastAccelY, 2);
-    Serial.print(" m/s², AccelZ: ");
-    Serial.print(lastAccelZ, 2);
-    Serial.print(" m/s² -> Brake Status: ");
-    
-    String currentStatus = "Normal";
-    if (mpuSensorFound) {
-      float accelX, accelY, accelZ;
-      if (readAcceleration(accelX, accelY, accelZ)) {
-        float accelMagnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-        float accelChange = abs(accelMagnitude - prevAccelMagnitude);
-        if (accelZ > accelThreshold || accelChange > 8.0) {
-          currentStatus = "HardBrake";
-        }
-      } else {
-        currentStatus = "Error";
-      }
-    } else {
-      currentStatus = "Error";
+// Sensor calibration (calculate offsets while stationary)
+void calibrateSensor() {
+  Serial.println("Calibrating sensor... Keep device still for 3 seconds");
+  
+  float sumX = 0, sumY = 0, sumZ = 0;
+  int samples = 0;
+  unsigned long startTime = millis();
+  
+  while (millis() - startTime < 3000) { // Measure for 3 seconds
+    float x, y, z;
+    if (readAcceleration(x, y, z)) {
+      sumX += x;
+      sumY += y;
+      sumZ += z;
+      samples++;
     }
-    
-    Serial.println(currentStatus);
+    delay(20);
   }
+  
+  if (samples > 0) {
+    accelXOffset = sumX / samples;
+    accelYOffset = sumY / samples;
+    accelZOffset = (sumZ / samples) - 9.81; // Remove gravity from Z-axis
+    calibrated = true;
+    
+    Serial.print("Calibration complete. Offsets: X=");
+    Serial.print(accelXOffset, 3); Serial.print(", Y=");
+    Serial.print(accelYOffset, 3); Serial.print(", Z=");
+    Serial.println(accelZOffset, 3);
+  }
+}
+
+// Calculate moving average
+float getMovingAverage() {
+  if (!bufferFilled && bufferIndex < 2) {
+    return accelBuffer[0]; // Return current value if not enough data
+  }
+  
+  float sum = 0;
+  int count = bufferFilled ? FILTER_SIZE : bufferIndex;
+  
+  for (int i = 0; i < count; i++) {
+    sum += accelBuffer[i];
+  }
+  
+  return sum / count;
 }
 
 // MPU6500 initialization function
 bool initializeMPU6500() {
   uint8_t who_am_i = readRegister(WHO_AM_I);
   if (who_am_i != 0x70) { // MPU6500
-    Serial.print("WHO_AM_I: 0x");
-    Serial.println(who_am_i, HEX);
     return false;
   }
 
@@ -159,9 +203,9 @@ bool initializeMPU6500() {
 // MPU6500 configuration function (±8g, 500°/s equivalent)
 void configureMPU6500() {
   writeRegister(0x19, 0x07); // SMPLRT_DIV
-  writeRegister(0x1A, 0x04); // CONFIG
+  writeRegister(0x1A, 0x04); // CONFIG - 20Hz low-pass filter
   writeRegister(0x1B, 0x08); // GYRO_CONFIG
-  writeRegister(0x1C, 0x10); // ACCEL_CONFIG
+  writeRegister(0x1C, 0x10); // ACCEL_CONFIG - ±8g range
 }
 
 // Read acceleration data (in m/s²)
